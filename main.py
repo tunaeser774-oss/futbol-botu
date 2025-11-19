@@ -9,16 +9,20 @@ from PIL import Image, ImageDraw, ImageFont
 from flask import Flask
 
 # =====================================================
-# 1. WEB SİTESİ AYARLARI (RENDER'I KANDIRMA)
+# 1. WEB SİTESİ AYARLARI
 # =====================================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "<h1>BOT CALISIYOR!</h1><p>Merak etme, Saha Ici Veri arka planda isliyor.</p>"
+    return "<h1>SAHA ICI VERI BOTU CALISIYOR</h1><p>Sistem Aktif.</p>"
+
+@app.route('/health')
+def health():
+    return "OK", 200
 
 # =====================================================
-# 2. AYARLAR VE ŞİFRELER
+# 2. AYARLAR
 # =====================================================
 CONSUMER_KEY = os.environ.get("TWITTER_CONSUMER_KEY")
 CONSUMER_SECRET = os.environ.get("TWITTER_CONSUMER_SECRET")
@@ -80,14 +84,13 @@ def istatistikleri_getir(fixture_id):
     except: return None
     return None
 
-# --- ASIL BOT DÖNGÜSÜ (Arka Planda Çalışacak) ---
+# --- BOT MANTIĞI ---
 def bot_loop():
     print("🚀 FUTBOL BOTU ARKA PLANDA BAŞLADI!")
     while True:
         try:
-            print("📡 Tarama yapılıyor...")
-            if not FUTBOL_API_KEY or not CONSUMER_KEY:
-                print("⚠️ Şifreler yok, bekleniyor...")
+            if not FUTBOL_API_KEY:
+                print("⚠️ Şifreler bekleniyor...")
                 time.sleep(60)
                 continue
 
@@ -128,7 +131,7 @@ def bot_loop():
                                 media = api.media_upload(resim_yolu)
                                 client.create_tweet(text=tweet, media_ids=[media.media_id])
                                 print(f"✅ TWEET ATILDI: {ev}-{dep}")
-                                time.sleep(20)
+                                time.sleep(300) # Aynı maçı tekrar atmamak için uzun bekle
                             except Exception as e:
                                 if "duplicate" in str(e).lower(): pass
                                 else: print(f"Hata: {e}")
@@ -143,15 +146,12 @@ def bot_loop():
             time.sleep(60)
 
 # =====================================================
-# 3. BAŞLATMA NOKTASI (Önce Botu Başlat, Sonra Siteyi Aç)
+# 🚀 ÖNEMLİ: BOTU BURADA BAŞLATIYORUZ
 # =====================================================
+# Gunicorn kodu çalıştırdığında burası devreye girer
+t = threading.Thread(target=bot_loop)
+t.daemon = True
+t.start()
+
 if __name__ == "__main__":
-    # 1. Botu Arka Plana At
-    thread = threading.Thread(target=bot_loop)
-    thread.daemon = True # Ana program kapanırsa bu da kapansın
-    thread.start()
-    
-    # 2. Web Sitesini Başlat (Render bunu görecek ve mutlu olacak)
-    # Port ayarı Render için çok kritiktir
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
