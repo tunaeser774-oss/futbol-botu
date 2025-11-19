@@ -3,27 +3,22 @@ import json
 import tweepy
 import time
 import os
-import threading # Aynı anda iki iş yapmak için
+import threading
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
-from flask import Flask # Sahte web sitesi için
+from flask import Flask
 
 # =====================================================
-# 1. SAHTE WEB SİTESİ AYARLARI (Render'ı Kandırma)
+# 1. WEB SİTESİ AYARLARI (RENDER'I KANDIRMA)
 # =====================================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Calisiyor! (Saha Ici Veri)"
-
-def run_web_server():
-    # Render'ın verdiği portu dinle
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    return "<h1>BOT CALISIYOR!</h1><p>Merak etme, Saha Ici Veri arka planda isliyor.</p>"
 
 # =====================================================
-# 2. GÜVENLİ AYARLAR (Environment)
+# 2. AYARLAR VE ŞİFRELER
 # =====================================================
 CONSUMER_KEY = os.environ.get("TWITTER_CONSUMER_KEY")
 CONSUMER_SECRET = os.environ.get("TWITTER_CONSUMER_SECRET")
@@ -44,7 +39,6 @@ def twittera_baglan():
     except:
         return None, None
 
-# --- RESİM MOTORU ---
 def mac_karti_olustur(ev, dep, skor_ev, skor_dep, lig, stats):
     img = Image.new('RGB', (800, 400), color=(20, 20, 30)) 
     d = ImageDraw.Draw(img)
@@ -65,98 +59,99 @@ def mac_karti_olustur(ev, dep, skor_ev, skor_dep, lig, stats):
     if stats:
         stat_text = f"SUT: {stats.get('ev_sut',0)} - {stats.get('dep_sut',0)}  |  ISABET: {stats.get('ev_isabet',0)} - {stats.get('dep_isabet',0)}"
         d.text((400, 280), stat_text, fill="white", anchor="mm", font=font_kucuk)
-        stat_text2 = f"TOPLA OYNAMA: {stats.get('ev_top','?')} - {stats.get('dep_top','?')}"
-        d.text((400, 320), stat_text2, fill="white", anchor="mm", font=font_kucuk)
 
     dosya_adi = "mac_sonucu.jpg"
     img.save(dosya_adi)
     return dosya_adi
 
-# --- İSTATİSTİK ---
 def istatistikleri_getir(fixture_id):
     headers = {'x-apisports-key': FUTBOL_API_KEY}
-    url = f"{BASE_URL}/fixtures/statistics?fixture={fixture_id}"
     try:
-        res = requests.get(url, headers=headers)
+        res = requests.get(f"{BASE_URL}/fixtures/statistics?fixture={fixture_id}", headers=headers)
         data = res.json()
         if "response" in data and len(data['response']) == 2:
             ev_stats = data['response'][0]['statistics']
             dep_stats = data['response'][1]['statistics']
-            def val(liste, tip):
-                for item in liste:
-                    if item['type'] == tip: return item['value']
+            def val(l, t):
+                for i in l: 
+                    if i['type'] == t: return i['value']
                 return 0
             return {"ev_sut": val(ev_stats, "Total Shots"), "dep_sut": val(dep_stats, "Total Shots"), "ev_isabet": val(ev_stats, "Shots on Goal"), "dep_isabet": val(dep_stats, "Shots on Goal"), "ev_top": val(ev_stats, "Ball Possession"), "dep_top": val(dep_stats, "Ball Possession")}
     except: return None
     return None
 
-# --- BOT MANTIĞI ---
-def botu_calistir():
-    if not FUTBOL_API_KEY or not CONSUMER_KEY:
-        print("⚠️ Şifreler eksik!")
-        return
-
-    api, client = twittera_baglan()
-    if not api: return
-
-    print("📡 Maçlar taranıyor...")
-    bugun = datetime.today().strftime('%Y-%m-%d')
-    headers = {'x-apisports-key': FUTBOL_API_KEY}
-    try:
-        response = requests.get(f"{BASE_URL}/fixtures", headers=headers, params={"date": bugun})
-        data = response.json()
-    except: return
-
-    if "response" in data:
-        for mac in data['response']:
-            fixture_id = mac['fixture']['id']
-            lig_id = mac['league']['id']
-            ev_id = mac['teams']['home']['id']
-            dep_id = mac['teams']['away']['id']
-            
-            gonder = False
-            if lig_id in VIP_LIGLER: gonder = True
-            elif (ev_id in VIP_TAKIMLAR) or (dep_id in VIP_TAKIMLAR): gonder = True
-            
-            if gonder and mac['fixture']['status']['short'] == "FT":
-                ev = mac['teams']['home']['name']
-                dep = mac['teams']['away']['name']
-                skor_ev = mac['goals']['home']
-                skor_dep = mac['goals']['away']
-                lig = mac['league']['name']
-                
-                stats = istatistikleri_getir(fixture_id)
-                resim_yolu = mac_karti_olustur(ev, dep, skor_ev, skor_dep, lig, stats)
-                tweet = f"🏁 MAÇ SONUCU | {lig}\n\n{ev} {skor_ev} - {skor_dep} {dep}\n\n#Futbol #{ev.replace(' ','')} #{dep.replace(' ','')}"
-                
-                print(f"🐦 Görsel Yükleniyor: {ev} vs {dep}")
-                try:
-                    media = api.media_upload(resim_yolu)
-                    client.create_tweet(text=tweet, media_ids=[media.media_id])
-                    print("✅ TWEET ATILDI!")
-                    time.sleep(15)
-                except Exception as e:
-                    if "duplicate" in str(e).lower(): print(f"⚠️ {ev}-{dep} zaten atılmış.")
-                    else: print(f"❌ Hata: {e}")
-
-def bot_dongusu():
-    print("🚀 BOT BAŞLATILDI (THREAD MODE)")
+# --- ASIL BOT DÖNGÜSÜ (Arka Planda Çalışacak) ---
+def bot_loop():
+    print("🚀 FUTBOL BOTU ARKA PLANDA BAŞLADI!")
     while True:
         try:
-            botu_calistir()
+            print("📡 Tarama yapılıyor...")
+            if not FUTBOL_API_KEY or not CONSUMER_KEY:
+                print("⚠️ Şifreler yok, bekleniyor...")
+                time.sleep(60)
+                continue
+
+            api, client = twittera_baglan()
+            if not api: 
+                time.sleep(60); continue
+
+            bugun = datetime.today().strftime('%Y-%m-%d')
+            headers = {'x-apisports-key': FUTBOL_API_KEY}
+            
+            try:
+                response = requests.get(f"{BASE_URL}/fixtures", headers=headers, params={"date": bugun})
+                data = response.json()
+                
+                if "response" in data:
+                    for mac in data['response']:
+                        fixture_id = mac['fixture']['id']
+                        lig_id = mac['league']['id']
+                        ev_id = mac['teams']['home']['id']
+                        dep_id = mac['teams']['away']['id']
+                        
+                        gonder = False
+                        if lig_id in VIP_LIGLER: gonder = True
+                        elif (ev_id in VIP_TAKIMLAR) or (dep_id in VIP_TAKIMLAR): gonder = True
+                        
+                        if gonder and mac['fixture']['status']['short'] == "FT":
+                            ev = mac['teams']['home']['name']
+                            dep = mac['teams']['away']['name']
+                            skor_ev = mac['goals']['home']
+                            skor_dep = mac['goals']['away']
+                            lig = mac['league']['name']
+                            
+                            stats = istatistikleri_getir(fixture_id)
+                            resim_yolu = mac_karti_olustur(ev, dep, skor_ev, skor_dep, lig, stats)
+                            tweet = f"🏁 MAÇ SONUCU | {lig}\n\n{ev} {skor_ev} - {skor_dep} {dep}\n\n#Futbol #{ev.replace(' ','')} #{dep.replace(' ','')}"
+                            
+                            try:
+                                media = api.media_upload(resim_yolu)
+                                client.create_tweet(text=tweet, media_ids=[media.media_id])
+                                print(f"✅ TWEET ATILDI: {ev}-{dep}")
+                                time.sleep(20)
+                            except Exception as e:
+                                if "duplicate" in str(e).lower(): pass
+                                else: print(f"Hata: {e}")
+            except Exception as e:
+                print(f"API Hatası: {e}")
+
             print("✅ Tur bitti. 10 dakika mola...")
-            time.sleep(600)
+            time.sleep(600) # 10 Dakika bekle
+            
         except Exception as e:
-            print(f"Hata: {e}")
+            print(f"Döngü Hatası: {e}")
             time.sleep(60)
 
 # =====================================================
-# 🚀 PROGRAMIN GİRİŞ NOKTASI (AYNI ANDA İKİ İŞ)
+# 3. BAŞLATMA NOKTASI (Önce Botu Başlat, Sonra Siteyi Aç)
 # =====================================================
 if __name__ == "__main__":
-    # 1. Bot Döngüsünü Arka Planda Başlat
-    t = threading.Thread(target=bot_dongusu)
-    t.start()
-
-    # 2. Sahte Web Sunucusunu Başlat (Render'ı kandırmak için)
-    run_web_server()
+    # 1. Botu Arka Plana At
+    thread = threading.Thread(target=bot_loop)
+    thread.daemon = True # Ana program kapanırsa bu da kapansın
+    thread.start()
+    
+    # 2. Web Sitesini Başlat (Render bunu görecek ve mutlu olacak)
+    # Port ayarı Render için çok kritiktir
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
